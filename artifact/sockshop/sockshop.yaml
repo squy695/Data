@@ -1,0 +1,1068 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front-end
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: front-end
+  template:
+    metadata:
+      labels:
+        app: front-end
+      annotations:
+        sidecar.istio.io/rewriteAppHTTPProbers: "true"
+    spec:
+      containers:
+      - name: front-end
+        image: weaveworksdemos/front-end:0.3.12
+        resources:
+          limits:
+            cpu: 100m
+            memory: 3000Mi
+          requests:
+            cpu: 50m
+            memory: 300Mi
+        ports:
+        - containerPort: 8079
+        env:
+        - name: SESSION_REDIS
+          value: "true"
+        - name: ZIPKIN
+          value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otelcollector:4317"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=front-end,service.version=1.0.0"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+              - all
+          readOnlyRootFilesystem: true
+        #livenessProbe:
+        # httpGet:
+        #    path: /
+        #    port: 8079
+        #  initialDelaySeconds: 30
+        #  periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8079
+          initialDelaySeconds: 30
+          periodSeconds: 15
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: front-end
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: "8079"
+  labels:
+    name: front-end
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8079
+  selector:
+    app: front-end
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: front-end-nodeport
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: "8079"
+  labels:
+    name: front-end
+spec:
+  type: NodePort
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8079
+    nodePort: 30695
+  selector:
+    app: front-end
+
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carts
+  labels:
+    name: carts
+  
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: carts
+  template:
+    metadata:
+      labels:
+        app: carts
+    spec:
+      containers:
+      - name: carts
+        image: weaveworksdemos/carts:0.4.8
+        env:
+         - name: JAVA_OPTS
+           value: -Xms64m -Xmx128m -XX:+UseG1GC -Djava.security.egd=file:/dev/urandom -Dspring.zipkin.enabled=false
+         - name: ZIPKIN
+           value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+         - name: OTEL_EXPORTER_OTLP_ENDPOINT
+           value: "http://otelcollector:4317"
+         - name: OTEL_RESOURCE_ATTRIBUTES
+           value: "service.name=carts,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2000Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        ports:
+        - containerPort: 80
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+              - all
+            add:
+              - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 90
+          periodSeconds: 15
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-volume
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            medium: Memory
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+#        kubernetes.io/hostname: lab-desktop
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts
+  annotations:
+    prometheus.io/scrape: 'true'
+  labels:
+    name: carts
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: carts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carts-db
+  labels:
+    name: carts-db
+  
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: carts-db
+  template:
+    metadata:
+      labels:
+        app: carts-db
+    spec:
+      containers:
+      - name: carts-db
+        image: mongo:3.4
+        ports:
+        - name: mongo
+          containerPort: 27017
+        env:
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=carts-db,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2000Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        securityContext:
+          capabilities:
+            drop:
+              - all
+            add:
+              - CHOWN
+              - SETGID
+              - SETUID
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-volume
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            medium: Memory
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts-db
+  labels:
+    name: carts-db
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - port: 27017
+    targetPort: 27017
+  selector:
+    app: carts-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalogue
+  labels:
+    name: catalogue
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalogue
+  template:
+    metadata:
+      labels:
+        app: catalogue
+    spec:
+      containers:
+      - name: catalogue
+        image: weaveworksdemos/catalogue:0.3.5
+        command: ["/app"]
+        args:
+        - -port=80
+        env:
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=catalogue,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 2000Mi
+          requests:
+            cpu: 50m
+            memory: 100Mi
+        ports:
+        - containerPort: 80
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+              - all
+            add:
+              - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: '80'
+  labels:
+    name: catalogue
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: catalogue
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalogue-db
+  labels:
+    name: catalogue-db
+  
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: catalogue-db
+  template:
+    metadata:
+      labels:
+        app: catalogue-db
+    spec:
+      containers:
+      - name: catalogue-db
+        image: weaveworksdemos/catalogue-db:0.3.0
+        env:
+          - name: MYSQL_ROOT_PASSWORD
+            value: fake_password
+          - name: MYSQL_DATABASE
+            value: socksdb
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=catalogue-db,service.version=1.0.0"
+        ports:
+        - name: mysql
+          containerPort: 3306
+        # resources:
+        #   limits:
+        #     cpu: 1000m
+        #     memory: 200Mi
+        #   requests:
+        #     cpu: 100m
+        #     memory: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue-db
+  labels:
+    name: catalogue-db
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - port: 3306
+    targetPort: 3306
+  selector:
+    app: catalogue-db
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  labels:
+    name: orders
+  
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      containers:
+      - name: orders
+        image: weaveworksdemos/orders:0.4.7
+        env:
+         - name: JAVA_OPTS
+           value: -Xms64m -Xmx128m -XX:+UseG1GC -Djava.security.egd=file:/dev/urandom -Dspring.zipkin.enabled=false
+         - name: ZIPKIN
+           value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+         - name: OTEL_EXPORTER_OTLP_ENDPOINT
+           value: "http://otelcollector:4317"
+         - name: OTEL_RESOURCE_ATTRIBUTES
+           value: "service.name=orders,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2000Mi
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        ports:
+        - containerPort: 80
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+              - all
+            add:
+              - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 90
+          periodSeconds: 15
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-volume
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            medium: Memory
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+#        kubernetes.io/hostname: lab-desktop
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: '80'
+  labels:
+    name: orders
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: orders
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-db
+  labels:
+    name: orders-db
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-db
+  template:
+    metadata:
+      labels:
+        app: orders-db
+    spec:
+      containers:
+      - name: orders-db
+        image: mongo:3.4
+        ports:
+        - name: mongo
+          containerPort: 27017
+        env:
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=orders-db,service.version=1.0.0"
+        securityContext:
+          capabilities:
+            drop:
+              - all
+            add:
+              - CHOWN
+              - SETGID
+              - SETUID
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-volume
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            medium: Memory
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-db
+  labels:
+    name: orders-db
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - port: 27017
+    targetPort: 27017
+  selector:
+    app: orders-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  labels:
+    name: payment
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment
+  template:
+    metadata:
+      labels:
+        app: payment
+    spec:
+      containers:
+      - name: payment
+        image: weaveworksdemos/payment:0.4.3
+        env:
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=payment,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 2000Mi
+          requests:
+            cpu: 50m
+            memory: 100Mi
+        ports:
+        - containerPort: 80
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+              - all
+            add:
+              - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 15
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: '80'
+  labels:
+    name: payment
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: payment
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-master
+  labels:
+    name: queue-master
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queue-master
+  template:
+    metadata:
+      labels:
+        app: queue-master
+    spec:
+      containers:
+      - name: queue-master
+        image: weaveworksdemos/queue-master:0.3.1
+        env:
+         - name: JAVA_OPTS
+           value: -Xms64m -Xmx128m -XX:+UseG1GC -Djava.security.egd=file:/dev/urandom -Dspring.zipkin.enabled=false
+         - name: ZIPKIN
+           value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+         - name: OTEL_EXPORTER_OTLP_ENDPOINT
+           value: "http://otelcollector:4317"
+         - name: OTEL_RESOURCE_ATTRIBUTES
+           value: "service.name=queue-master,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 2000Mi
+          requests:
+            cpu: 50m
+            memory: 300Mi
+        ports:
+        - containerPort: 80
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+#        kubernetes.io/hostname: lab-desktop
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue-master
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: '80'
+  labels:
+    name: queue-master
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: queue-master
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  labels:
+    name: rabbitmq
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+      annotations:
+        prometheus.io/scrape: 'true'
+    spec:
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.6.8-management
+        ports:
+        - containerPort: 15672
+          name: management
+        - containerPort: 5672
+          name: rabbitmq
+        securityContext:
+          capabilities:
+            drop:
+              - all
+            add:
+              - CHOWN
+              - SETGID
+              - SETUID
+              - DAC_OVERRIDE
+          readOnlyRootFilesystem: true
+        env:
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=rabbitmq,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 1000Mi
+          requests:
+            cpu: 50m
+            memory: 300Mi
+      - name: rabbitmq-exporter
+        image: kbudde/rabbitmq-exporter
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+          name: exporter
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  annotations:
+        prometheus.io/scrape: 'true'
+  labels:
+    name: rabbitmq
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - port: 5672
+    name: rabbitmq
+    targetPort: 5672
+  - port: 9090
+    name: exporter
+    targetPort: exporter
+    protocol: TCP
+  selector:
+    app: rabbitmq
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session-db
+  labels:
+    name: session-db
+  
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: session-db
+  template:
+    metadata:
+      labels:
+        app: session-db
+      annotations:
+        prometheus.io.scrape: "false"
+    spec:
+      containers:
+      - name: session-db
+        image: redis:alpine
+        ports:
+        - name: redis
+          containerPort: 6379
+        env:
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=session-db,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1000Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        securityContext:
+          capabilities:
+            drop:
+              - all
+            add:
+              - CHOWN
+              - SETGID
+              - SETUID
+          readOnlyRootFilesystem: true
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: session-db
+  labels:
+    name: session-db
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: session-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipping
+  labels:
+    name: shipping
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shipping
+  template:
+    metadata:
+      labels:
+        app: shipping
+    spec:
+      containers:
+      - name: shipping
+        image: weaveworksdemos/shipping:0.4.8
+        env:
+         - name: ZIPKIN
+           value: zipkin.jaeger.svc.cluster.local
+         - name: JAVA_OPTS
+           value: -Xms64m -Xmx128m -XX:+UseG1GC -Djava.security.egd=file:/dev/urandom -Dspring.zipkin.enabled=false
+         - name: OTEL_EXPORTER_OTLP_ENDPOINT
+           value: "http://otelcollector:4317"
+         - name: OTEL_RESOURCE_ATTRIBUTES
+           value: "service.name=shipping,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 2000Mi
+          requests:
+            cpu: 50m
+            memory: 300Mi
+        ports:
+        - containerPort: 80
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+              - all
+            add:
+              - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-volume
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            medium: Memory
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+#        kubernetes.io/hostname: lab-desktop
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shipping
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: '80'
+  labels:
+    name: shipping
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: shipping
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user
+  labels:
+    name: user
+  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user
+  template:
+    metadata:
+      labels:
+        app: user
+    spec:
+      containers:
+      - name: user
+        image: weaveworksdemos/user:0.4.7
+        resources:
+          limits:
+            cpu: 100m
+            memory: 2000Mi
+          requests:
+            cpu: 50m
+            memory: 100Mi
+        ports:
+        - containerPort: 80
+        env:
+        - name: ZIPKIN
+          value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+        - name: mongo
+          value: user-db:27017
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otelcollector:4317"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=user,service.version=1.0.0"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+              - all
+            add:
+              - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 15
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: '80'
+  labels:
+    name: user
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    app: user
+
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-db
+  labels:
+    name: user-db
+  
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-db
+  template:
+    metadata:
+      labels:
+        app: user-db
+    spec:
+      containers:
+      - name: user-db
+        image: weaveworksdemos/user-db:0.3.0
+        env:
+          - name: ZIPKIN
+            value: http://zipkin.jaeger.svc.cluster.local:9411/api/v1/spans
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otelcollector:4317"
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.name=user-db,service.version=1.0.0"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2000Mi
+          requests:
+            cpu: 200m
+            memory: 100Mi
+        ports:
+        - name: mongo
+          containerPort: 27017
+        securityContext:
+          capabilities:
+            drop:
+              - all
+            add:
+              - CHOWN
+              - SETGID
+              - SETUID
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-volume
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            medium: Memory
+#      nodeSelector:
+#        beta.kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-db
+  labels:
+    name: user-db
+  
+spec:
+  ports:
+    # the port that this service should serve on
+  - port: 27017
+    targetPort: 27017
+  selector:
+    app: user-db

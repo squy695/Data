@@ -1,0 +1,45 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: front-end
+spec:
+  hosts:
+  - "front-end.socks.svc.cluster.local"
+  http:
+  - route:
+    - destination:
+        host: front-end
+        port:
+          number: 80
+
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: front-end-gateway
+spec:
+  selector:
+    istio: ingressgateway # use Istio default gateway implementation
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: front-end-ingress
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - front-end-gateway
+  http:
+  - route:
+    - destination:
+        host: front-end
+        port:
+          number: 80

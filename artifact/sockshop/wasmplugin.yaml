@@ -1,0 +1,42 @@
+apiVersion: extensions.istio.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: istio-attributegen-filter-socks
+  namespace: istio-system
+spec:
+  selector:
+    matchLabels:
+      app: front-end
+  url: https://storage.googleapis.com/istio-build/proxy/attributegen-359dcd3a19f109c50e97517fe6b1e2676e870c4d.wasm
+  imagePullPolicy: Always
+  phase: AUTHN
+  pluginConfig:
+    attributes:
+      - output_attribute: "istio_operationId"
+        match:
+          - value: "/ && GET"
+            condition: "request.url_path == '/' && request.method == 'GET'"
+
+          - value: "/login && GET"
+            condition: "request.url_path == '/login' && request.method == 'GET'"
+            
+          - value: "/customers && GET"
+            condition: "request.url_path == '/customers' && request.method == 'GET'"
+
+          - value: "/category.html && GET"
+            condition: "request.url_path == '/category.html' && request.method == 'GET'"
+            
+          - value: "/detail.html?id={} && GET"
+            condition: "request.url_path == '/detail.html' && request.method == 'GET'"
+
+          - value: "/cart && DELETE"
+            condition: "request.url_path == '/cart' && request.method == 'DELETE'"
+
+          - value: "/cart && POST"
+            condition: "request.url_path == '/cart' && request.method == 'POST'"
+
+          - value: "/basket.html && GET"
+            condition: "request.url_path == '/basket.html' && request.method == 'GET'"
+
+          - value: "/orders && POST"
+            condition: "request.url_path == '/orders' && request.method == 'POST'"
